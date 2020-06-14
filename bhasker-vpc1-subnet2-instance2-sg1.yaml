@@ -1,0 +1,165 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'First pratical of ec2 creation'
+Parameters:
+    CidrRange:
+        Description: ' cidr to be used 10.15.xxx.0/24'
+        Type: Number
+        ConstraintDescription: 'Must be in range 0-255'
+        MaxValue: 255
+        MinValue: 0
+        Default: 0
+
+    Subpub:
+        Description: 'cidr ofsubnets (public) 10.15.xxx.xxx/25'
+        Type: Number
+        AllowedValues:
+        -   0
+        -   127
+
+    Subpri:
+        Description: 'cidr ofsubnets (public) 10.15.xxx.xxx/25'
+        Type: Number
+        AllowedValues:
+        -   128
+        -   255
+    InstanceClass:
+        Type: String
+        Description: 'Type of Instance class that you want to have'
+        Default: 't2.micro'
+        AllowedValues:
+        -   t2.medium
+        -   t3.medium
+        -   t3.large
+        -   t3.xlarge
+        -   m5.large
+        -   m5.xlarge
+        -   m5.2xlarge
+        -   t3.small
+        -   t2.micro
+
+Resources:
+    VPC:
+        Type: 'AWS::EC2::VPC'
+        Properties:
+            CidrBlock: !Sub '10.15.${CidrRange}.0/24'
+            EnableDnsSupport: true
+            EnableDnsHostnames: true
+            InstanceTenancy: default
+            Tags:
+            -   Key: Name
+                Value: !Sub 'My-test-vpc-${CidrRange}'
+
+    InternetGateway:
+        Type: 'AWS::EC2::InternetGateway'
+        Properties:
+            Tags:
+            -   Key: Name
+                Value: !Sub 'igw-10.15.${CidrRange}.0/24'
+
+    VPCGatewayAttachment:
+        Type: 'AWS::EC2::VPCGatewayAttachment'
+        Properties:
+            VpcId: !Ref VPC
+            InternetGatewayId: !Ref InternetGateway
+
+    SubnetPublic:
+        Type: 'AWS::EC2::Subnet'
+        Properties:
+            AvailabilityZone: !Select [0 , !GetAZs '']
+            CidrBlock: !Sub '10.15.${CidrRange}.${Subpub}/25'
+            VpcId: !Ref VPC
+            Tags:
+            -   Key: Name
+                Value: !Sub 'Public Subnet 10.15.${CidrRange}.${Subpub}/25'
+
+    SubnetPrivate:
+        Type: 'AWS::EC2::Subnet'
+        Properties:
+            CidrBlock: !Sub '10.15.${CidrRange}.${Subpri}/25'
+            VpcId: !Ref VPC
+            AvailabilityZone: !Select [1 , !GetAZs '']
+            Tags:
+            -   Key: Name
+                Value: !Sub 'Private Subnet 10.15.${CidrRange}.${Subpri}/25'
+
+################################## RT creation #############################
+
+    RouteTablePublic:
+        Type: 'AWS::EC2::RouteTable'
+        Properties:
+            VpcId: !Ref VPC
+            Tags:
+            -   Key: Name
+                Value: 'Public Route table'
+
+    RouteTablePrivate:
+        Type: 'AWS::EC2::RouteTable'
+        Properties:
+            VpcId: !Ref VPC
+            Tags:
+            -   Key: Name
+                Value: 'Route table private'
+
+    RouteTableAssocicationPublic:
+        Type: 'AWS::EC2::SubnetRouteTableAssociation'
+        Properties:
+            RouteTableId: !Ref RouteTablePublic
+            SubnetId: !Ref SubnetPublic
+
+    RouteTableAssociationPrivate:
+        Type: 'AWS::EC2::SubnetRouteTableAssociation'
+        Properties:
+            RouteTableId: !Ref RouteTablePrivate
+            SubnetId: !Ref SubnetPrivate
+
+############### Public Internet routes #####################
+
+    RouteTablePublicInternetForPublicSubnet:
+        Type: 'AWS::EC2::Route'
+        DependsOn: VPCGatewayAttachment
+        Properties:
+            RouteTableId: !Ref RouteTablePublic
+            DestinationCidrBlock: '0.0.0.0/0'
+            GatewayId: !Ref InternetGateway
+
+############### SG  #####################
+
+    mynewSG:
+        Type: 'AWS::EC2::SecurityGroup'
+        Properties:
+            VpcId: !Ref VPC
+            GroupDescription: 'enable ssh acess by port 22'
+            SecurityGroupIngress:
+                CidrIp: '0.0.0.0/0'
+                ToPort: 22
+                FromPort: 22
+                IpProtocol: 'tcp'
+    Microec2pub:
+        Type: 'AWS::EC2::Instance'
+        Properties:
+            ImageId: 'ami-0e34e7b9ca0ace12d'
+            AvailabilityZone: !Select [0, !GetAZs '']
+            InstanceType: 't2.micro'
+            KeyName: 'gp_rep_key'
+            NetworkInterfaces:
+            -   AssociatePublicIpAddress: true
+                DeleteOnTermination: true
+                DeviceIndex: 0
+                SubnetId: !Ref SubnetPublic
+                GroupSet:
+                -   !Ref mynewSG
+
+    Microec2pri:
+        Type: 'AWS::EC2::Instance'
+        Properties:
+            ImageId: 'ami-0e34e7b9ca0ace12d'
+            AvailabilityZone: !Select [1, !GetAZs '']
+            InstanceType: 't2.micro'
+            KeyName: 'gp_rep_key'
+            NetworkInterfaces:
+            -   AssociatePublicIpAddress: false
+                DeleteOnTermination: true
+                DeviceIndex: 0
+                SubnetId: !Ref SubnetPrivate
+                GroupSet:
+                -   !Ref mynewSG
